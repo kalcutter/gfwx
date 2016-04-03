@@ -86,7 +86,7 @@ namespace GFWX
 		uint32_t * buffer, * bufferEnd;
 		uint32_t writeCache;
 		int indexBits;	// -1 indicates buffer overflow
-		Bits(uint32_t * buffer, uint32_t * bufferEnd) : buffer(buffer), writeCache(0), indexBits(0), bufferEnd(bufferEnd) {}
+		Bits(uint32_t * buffer, uint32_t * bufferEnd) : buffer(buffer), bufferEnd(bufferEnd), writeCache(0), indexBits(0) {}
 		uint32_t getBits(int bits)
 		{
 			int newBits = indexBits + bits;
@@ -126,7 +126,7 @@ namespace GFWX
 			}
 			indexBits = newBits;
 		}
-		uint32_t getZeros(int maxZeros)
+		uint32_t getZeros(uint32_t maxZeros)
 		{
 			int newBits = indexBits;
 			if (buffer == bufferEnd)
@@ -231,7 +231,6 @@ namespace GFWX
 	{
 		int const sizex = x1 - x0;
 		int const sizey = y1 - y0;
-		int const stride = image.sizex;
 		while (step < sizex || step < sizey)
 		{
 			if (step < sizex)	// horizontal lifting
@@ -308,7 +307,6 @@ namespace GFWX
 	{
 		int const sizex = x1 - x0;
 		int const sizey = y1 - y0;
-		int const stride = image.sizex;
 		int step = minStep;
 		while (step * 2 < sizex || step * 2 < sizey)
 			step *= 2;
@@ -386,7 +384,7 @@ namespace GFWX
 
 	template<typename T, bool dequantize> void quantize(Image<T> & image, int x0, int y0, int x1, int y1, int step, int quality, int minQ, int maxQ)
 	{
-		typedef std::conditional<sizeof(T) < 4, int32_t, int64_t>::type aux;
+		typedef typename std::conditional<sizeof(T) < 4, int32_t, int64_t>::type aux;
 		int const sizex = x1 - x0;
 		int const sizey = y1 - y0;
 		int skip = step;
@@ -671,8 +669,8 @@ namespace GFWX
 	template<typename I> ptrdiff_t compress(I const & imageData, Header & header, uint8_t * buffer, size_t size,
 		int * channelTransform, uint8_t * metaData, size_t metaDataSize)
 	{
-		typedef std::remove_reference<decltype(imageData[0])>::type base;
-		typedef std::conditional<sizeof(base) < 2, int16_t, int32_t>::type aux;
+		typedef typename std::remove_reference<decltype(imageData[0])>::type base;
+		typedef typename std::conditional<sizeof(base) < 2, int16_t, int32_t>::type aux;
 		Bits stream(reinterpret_cast<uint32_t *>(buffer), reinterpret_cast<uint32_t *>(buffer) + size / 4);
 		stream.putBits('G' | ('F' << 8) | ('W' << 16) | ('X' << 24), 32);
 		stream.putBits(header.version = 1, 32);
@@ -786,8 +784,8 @@ namespace GFWX
 
 	template<typename I> ptrdiff_t decompress(I const & imageData, Header & header, uint8_t * data, size_t size, int downsampling, bool test)
 	{
-		typedef std::remove_reference<decltype(imageData[0])>::type base;
-		typedef std::conditional<sizeof(base) < 2, int16_t, int32_t>::type aux;
+		typedef typename std::remove_reference<decltype(imageData[0])>::type base;
+		typedef typename std::conditional<sizeof(base) < 2, int16_t, int32_t>::type aux;
 		Bits stream(reinterpret_cast<uint32_t *>(data), reinterpret_cast<uint32_t *>(data) + size / 4);
 		if (size < 28)	// at least load the header
 			return 28;
