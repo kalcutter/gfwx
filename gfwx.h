@@ -782,11 +782,11 @@ namespace GFWX
 		return reinterpret_cast<uint8_t *>(stream.buffer) - buffer;	// return size in bytes
 	}
 
-	template<typename I> ptrdiff_t decompress(I const & imageData, Header & header, uint8_t * data, size_t size, int downsampling, bool test)
+	template<typename I> ptrdiff_t decompress(I const & imageData, Header & header, const uint8_t * data, size_t size, int downsampling, bool test)
 	{
 		typedef typename std::remove_reference<decltype(imageData[0])>::type base;
 		typedef typename std::conditional<sizeof(base) < 2, int16_t, int32_t>::type aux;
-		Bits stream(reinterpret_cast<uint32_t *>(data), reinterpret_cast<uint32_t *>(data) + size / 4);
+		Bits stream(reinterpret_cast<uint32_t *>(const_cast<uint8_t *>(data)), reinterpret_cast<uint32_t *>(const_cast<uint8_t *>(data)) + size / 4);
 		if (size < 28)	// at least load the header
 			return 28;
 		if (stream.getBits(32) != uint32_t('G' | ('F' << 8) | ('W' << 16) | ('X' << 24)))
