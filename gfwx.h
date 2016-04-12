@@ -41,10 +41,14 @@
 //  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <limits>
 #include <algorithm>
-#include <vector>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <type_traits>
+#include <utility>
+#include <vector>
 #if defined(_OPENMP)
 #include <omp.h>
 #endif
