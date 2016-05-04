@@ -748,8 +748,8 @@ namespace GFWX
 		for (bool hasDC = true; step >= 1; hasDC = false)
 		{
 			int const bs = 1 << header.blockSize;
-			int const blockCountX = std::max(1, (header.sizex / step + bs - 1) / bs);
-			int const blockCountY = std::max(1, (header.sizey / step + bs - 1) / bs);
+			int const blockCountX = (header.sizex + step * bs - 1) / (step * bs);
+			int const blockCountY = (header.sizey + step * bs - 1) / (step * bs);
 			int const blockCount = blockCountX * blockCountY * header.layers * header.channels;
 			std::vector<Bits> streamBlock(blockCount, Bits(0, 0));
 			uint32_t * blockBegin = stream.buffer + blockCount;	// leave space for block sizes
@@ -850,8 +850,8 @@ namespace GFWX
 		for (bool hasDC = true; (step >> downsampling) >= 1; hasDC = false)	// decode just enough coefficients for downsampled image
 		{
 			int const bs = 1 << header.blockSize;
-			int const blockCountX = std::max(1, (header.sizex / step + bs - 1) / bs);
-			int const blockCountY = std::max(1, (header.sizey / step + bs - 1) / bs);
+			int const blockCountX = (header.sizex + step * bs - 1) / (step * bs);
+			int const blockCountY = (header.sizey + step * bs - 1) / (step * bs);
 			int const blockCount = blockCountX * blockCountY * header.layers * header.channels;
 			isTruncated = true;
 			if (stream.buffer + 1 + blockCount > stream.bufferEnd)	// check for enough buffer to read block sizes
