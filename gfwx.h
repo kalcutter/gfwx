@@ -747,9 +747,9 @@ namespace GFWX
 			step *= 2;
 		for (bool hasDC = true; step >= 1; hasDC = false)
 		{
-			int const bs = 1 << header.blockSize;
-			int const blockCountX = (header.sizex + step * bs - 1) / (step * bs);
-			int const blockCountY = (header.sizey + step * bs - 1) / (step * bs);
+			int64_t const bs = int64_t(step) << header.blockSize;
+			int const blockCountX = (header.sizex + bs - 1) / bs;
+			int const blockCountY = (header.sizey + bs - 1) / bs;
 			int const blockCount = blockCountX * blockCountY * header.layers * header.channels;
 			std::vector<Bits> streamBlock(blockCount, Bits(0, 0));
 			uint32_t * blockBegin = stream.buffer + blockCount;	// leave space for block sizes
@@ -765,12 +765,12 @@ namespace GFWX
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
 				Image<aux> auxImage(&auxData[c * bufferSize], header.sizex, header.sizey);
 				if (header.intent < IntentBayerRGGB || header.intent > IntentBayerGeneric)
-					encode(auxImage, streamBlock[block], bx * bs * step, by * bs * step,
-					int(std::min(int64_t(bx + 1) * bs * step, int64_t(header.sizex))), int(std::min(int64_t(by + 1) * bs * step, int64_t(header.sizey))),
+					encode(auxImage, streamBlock[block], bx * bs, by * bs,
+					int(std::min((bx + 1) * bs, int64_t(header.sizex))), int(std::min((by + 1) * bs, int64_t(header.sizey))),
 					step, header.encoder, isChroma[c] ? chromaQuality : header.quality, hasDC && !bx && !by, isChroma[c] != 0);
 				else for (int ox = 0; ox <= 1; ++ ox) for (int oy = 0; oy <= 1; ++ oy)
-					encode(auxImage, streamBlock[block], bx * bs * step + ox, by * bs * step + oy,
-					int(std::min(int64_t(bx + 1) * bs * step, int64_t(header.sizex))), int(std::min(int64_t(by + 1) * bs * step, int64_t(header.sizey))),
+					encode(auxImage, streamBlock[block], bx * bs + ox, by * bs + oy,
+					int(std::min((bx + 1) * bs, int64_t(header.sizex))), int(std::min((by + 1) * bs, int64_t(header.sizey))),
 					2 * step, header.encoder, (ox || oy) ? chromaQuality : header.quality, hasDC && !bx && !by, ox || oy);
 				streamBlock[block].flushWriteWord();
 			}
@@ -849,9 +849,9 @@ namespace GFWX
 			step *= 2;
 		for (bool hasDC = true; (step >> downsampling) >= 1; hasDC = false)	// decode just enough coefficients for downsampled image
 		{
-			int const bs = 1 << header.blockSize;
-			int const blockCountX = (header.sizex + step * bs - 1) / (step * bs);
-			int const blockCountY = (header.sizey + step * bs - 1) / (step * bs);
+			int64_t const bs = int64_t(step) << header.blockSize;
+			int const blockCountX = (header.sizex + bs - 1) / bs;
+			int const blockCountY = (header.sizey + bs - 1) / bs;
 			int const blockCount = blockCountX * blockCountY * header.layers * header.channels;
 			isTruncated = true;
 			if (stream.buffer + 1 + blockCount > stream.bufferEnd)	// check for enough buffer to read block sizes
@@ -866,6 +866,7 @@ namespace GFWX
 			nextPointOfInterest = reinterpret_cast<uint8_t *>(stream.buffer + ((step >> downsampling) > 1 ? blockCount * 4 : 0)) - data;
 			if (stream.buffer <= stream.bufferEnd)
 				isTruncated = false;
+			int64_t const bsDown = bs >> downsampling;
 			int const stepDown = step >> downsampling;
 			#pragma omp parallel for schedule(dynamic, 4)	// [MAGIC] for some reason, 4 is by far the best option here
 			for (int block = 0; block < blockCount; ++ block) if (!test && streamBlock[block].bufferEnd <= stream.bufferEnd)
@@ -873,12 +874,12 @@ namespace GFWX
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
 				Image<aux> auxImage(&auxData[c * bufferSize], sizexDown, sizeyDown);
 				if (header.intent < IntentBayerRGGB || header.intent > IntentBayerGeneric)
-					decode(auxImage, streamBlock[block], bx * bs * stepDown, by * bs * stepDown,
-					int(std::min(int64_t(bx + 1) * bs * stepDown, int64_t(sizexDown))), int(std::min(int64_t(by + 1) * bs * stepDown, int64_t(sizeyDown))),
+					decode(auxImage, streamBlock[block], bx * bsDown, by * bsDown,
+					int(std::min((bx + 1) * bsDown, int64_t(sizexDown))), int(std::min((by + 1) * bsDown, int64_t(sizeyDown))),
 					stepDown, header.encoder, isChroma[c] ? chromaQuality : header.quality, hasDC && !bx && !by, isChroma[c] != 0);
 				else for (int ox = 0; ox <= 1; ++ ox) for (int oy = 0; oy <= 1; ++ oy)
-					decode(auxImage, streamBlock[block], bx * bs * stepDown + ox, by * bs * stepDown + oy,
-					int(std::min(int64_t(bx + 1) * bs * stepDown, int64_t(sizexDown))), int(std::min(int64_t(by + 1) * bs * stepDown, int64_t(sizeyDown))),
+					decode(auxImage, streamBlock[block], bx * bsDown + ox, by * bsDown + oy,
+					int(std::min((bx + 1) * bsDown, int64_t(sizexDown))), int(std::min((by + 1) * bsDown, int64_t(sizeyDown))),
 					2 * stepDown, header.encoder, (ox || oy) ? chromaQuality : header.quality, hasDC && !bx && !by, ox || oy);
 			}
 			for (int block = 0; block < blockCount; ++ block)	// check if any blocks ran out of buffer, which should not happen on valid files
