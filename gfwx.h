@@ -920,10 +920,20 @@ namespace GFWX
 		{
 			aux * destination = &auxData[c * bufferSize];
 			auto layer = imageData + ((c / header.channels) * bufferSize * header.channels + c % header.channels);
-			#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
-			for (int i = 0; i < bufferSize; ++ i)
-				layer[i * header.channels] = static_cast<base>(std::max(static_cast<aux>(std::numeric_limits<base>::lowest()),
-					std::min(static_cast<aux>(std::numeric_limits<base>::max()), static_cast<aux>(destination[i] / boost))));
+			if (boost == 1)
+			{
+				#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+				for (int i = 0; i < bufferSize; ++ i)
+					layer[i * header.channels] = static_cast<base>(std::max(static_cast<aux>(std::numeric_limits<base>::lowest()),
+						std::min(static_cast<aux>(std::numeric_limits<base>::max()), static_cast<aux>(destination[i]))));
+			}
+			else
+			{
+				#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+				for (int i = 0; i < bufferSize; ++ i)
+					layer[i * header.channels] = static_cast<base>(std::max(static_cast<aux>(std::numeric_limits<base>::lowest()),
+						std::min(static_cast<aux>(std::numeric_limits<base>::max()), static_cast<aux>(destination[i] / boost))));
+			}
 			if (header.quality < QualityMax && header.intent >= IntentBayerRGGB && header.intent <= IntentBayerGBRG)	// check if Bayer cleanup is required
 			{
 				int const bayerNoiseThresh = ((QualityMax + header.quality / 2) / header.quality + (QualityMax + chromaQuality / 2) / chromaQuality) * 2;
