@@ -786,7 +786,7 @@ namespace GFWX
 		return reinterpret_cast<uint8_t *>(stream.buffer) - buffer;	// return size in bytes
 	}
 
-	template<typename I> ptrdiff_t decompress(I const & imageData, Header & header, const uint8_t * data, size_t size, int downsampling, bool test)
+	template<typename I> ptrdiff_t decompress(I const & imageData, Header & header, uint8_t const * data, size_t size, int downsampling, bool test)
 	{
 		typedef typename std::remove_reference<decltype(imageData[0])>::type base;
 		typedef typename std::conditional<sizeof(base) < 2, int16_t, int32_t>::type aux;
@@ -850,8 +850,8 @@ namespace GFWX
 		for (bool hasDC = true; (step >> downsampling) >= 1; hasDC = false)	// decode just enough coefficients for downsampled image
 		{
 			int64_t const bs = int64_t(step) << header.blockSize;
-			int const blockCountX = (header.sizex + bs - 1) / bs;
-			int const blockCountY = (header.sizey + bs - 1) / bs;
+			int const blockCountX = int((header.sizex + bs - 1) / bs);
+			int const blockCountY = int((header.sizey + bs - 1) / bs);
 			int const blockCount = blockCountX * blockCountY * header.layers * header.channels;
 			isTruncated = true;
 			if (stream.buffer + 1 + blockCount > stream.bufferEnd)	// check for enough buffer to read block sizes
@@ -866,19 +866,19 @@ namespace GFWX
 			nextPointOfInterest = reinterpret_cast<uint8_t *>(stream.buffer + ((step >> downsampling) > 1 ? blockCount * 4 : 0)) - data;
 			if (stream.buffer <= stream.bufferEnd)
 				isTruncated = false;
-			int64_t const bsDown = bs >> downsampling;
 			int const stepDown = step >> downsampling;
+			int64_t const bsDown = int64_t(stepDown) << header.blockSize;
 			#pragma omp parallel for schedule(dynamic, 4)	// [MAGIC] for some reason, 4 is by far the best option here
 			for (int block = 0; block < blockCount; ++ block) if (!test && streamBlock[block].bufferEnd <= stream.bufferEnd)
 			{
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
 				Image<aux> auxImage(&auxData[c * bufferSize], sizexDown, sizeyDown);
 				if (header.intent < IntentBayerRGGB || header.intent > IntentBayerGeneric)
-					decode(auxImage, streamBlock[block], bx * bsDown, by * bsDown,
+					decode(auxImage, streamBlock[block], int(bx * bsDown), int(by * bsDown),
 					int(std::min((bx + 1) * bsDown, int64_t(sizexDown))), int(std::min((by + 1) * bsDown, int64_t(sizeyDown))),
 					stepDown, header.encoder, isChroma[c] ? chromaQuality : header.quality, hasDC && !bx && !by, isChroma[c] != 0);
 				else for (int ox = 0; ox <= 1; ++ ox) for (int oy = 0; oy <= 1; ++ oy)
-					decode(auxImage, streamBlock[block], bx * bsDown + ox, by * bsDown + oy,
+					decode(auxImage, streamBlock[block], int(bx * bsDown + ox), int(by * bsDown + oy),
 					int(std::min((bx + 1) * bsDown, int64_t(sizexDown))), int(std::min((by + 1) * bsDown, int64_t(sizeyDown))),
 					2 * stepDown, header.encoder, (ox || oy) ? chromaQuality : header.quality, hasDC && !bx && !by, ox || oy);
 			}
