@@ -402,7 +402,7 @@ namespace GFWX
 				T * base = &image[y0 + y][x0];
 				int const xStep = (y & skip) ? skip : skip * 2;
 				for (int x = xStep - skip; x < sizex; x += xStep)	// [NOTE] arranged so that (x | y) & skip == 1
-					base[x] = dequantize ? (aux(base[x]) * maxQ + (base[x] < 0 ? -maxQ / 2 : base[x] > 0 ? maxQ / 2 : 0)) / q : aux(base[x]) * q / maxQ;
+					base[x] = T(dequantize ? (aux(base[x]) * maxQ + (base[x] < 0 ? -maxQ / 2 : base[x] > 0 ? maxQ / 2 : 0)) / q : aux(base[x]) * q / maxQ);
 			}
 			skip *= 2;
 			quality = std::min(maxQ, quality * 2);	// [MAGIC] This approximates the JPEG 2000 baseline quantizer
@@ -748,8 +748,8 @@ namespace GFWX
 		for (bool hasDC = true; step >= 1; hasDC = false)
 		{
 			int64_t const bs = int64_t(step) << header.blockSize;
-			int const blockCountX = (header.sizex + bs - 1) / bs;
-			int const blockCountY = (header.sizey + bs - 1) / bs;
+			int const blockCountX = int((header.sizex + bs - 1) / bs);
+			int const blockCountY = int((header.sizey + bs - 1) / bs);
 			int const blockCount = blockCountX * blockCountY * header.layers * header.channels;
 			std::vector<Bits> streamBlock(blockCount, Bits(0, 0));
 			uint32_t * blockBegin = stream.buffer + blockCount;	// leave space for block sizes
@@ -765,11 +765,11 @@ namespace GFWX
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
 				Image<aux> auxImage(&auxData[c * bufferSize], header.sizex, header.sizey);
 				if (header.intent < IntentBayerRGGB || header.intent > IntentBayerGeneric)
-					encode(auxImage, streamBlock[block], bx * bs, by * bs,
+					encode(auxImage, streamBlock[block], int(bx * bs), int(by * bs),
 					int(std::min((bx + 1) * bs, int64_t(header.sizex))), int(std::min((by + 1) * bs, int64_t(header.sizey))),
 					step, header.encoder, isChroma[c] ? chromaQuality : header.quality, hasDC && !bx && !by, isChroma[c] != 0);
 				else for (int ox = 0; ox <= 1; ++ ox) for (int oy = 0; oy <= 1; ++ oy)
-					encode(auxImage, streamBlock[block], bx * bs + ox, by * bs + oy,
+					encode(auxImage, streamBlock[block], int(bx * bs + ox), int(by * bs + oy),
 					int(std::min((bx + 1) * bs, int64_t(header.sizex))), int(std::min((by + 1) * bs, int64_t(header.sizey))),
 					2 * step, header.encoder, (ox || oy) ? chromaQuality : header.quality, hasDC && !bx && !by, ox || oy);
 				streamBlock[block].flushWriteWord();
