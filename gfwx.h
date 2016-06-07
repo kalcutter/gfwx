@@ -763,14 +763,14 @@ namespace GFWX
 			for (int block = 0; block < blockCount; ++ block)
 			{
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
+				int const bx1 = (bx + 1) * step > header.sizex >> header.blockSize ? header.sizex : (bx + 1) * step << header.blockSize;
+				int const by1 = (by + 1) * step > header.sizey >> header.blockSize ? header.sizey : (by + 1) * step << header.blockSize;
 				Image<aux> auxImage(&auxData[c * bufferSize], header.sizex, header.sizey);
 				if (header.intent < IntentBayerRGGB || header.intent > IntentBayerGeneric)
-					encode(auxImage, streamBlock[block], int(bx * bs), int(by * bs),
-					int(std::min((bx + 1) * bs, int64_t(header.sizex))), int(std::min((by + 1) * bs, int64_t(header.sizey))),
+					encode(auxImage, streamBlock[block], bx * step << header.blockSize, by * step << header.blockSize, bx1, by1,
 					step, header.encoder, isChroma[c] ? chromaQuality : header.quality, hasDC && !bx && !by, isChroma[c] != 0);
 				else for (int ox = 0; ox <= 1; ++ ox) for (int oy = 0; oy <= 1; ++ oy)
-					encode(auxImage, streamBlock[block], int(bx * bs + ox), int(by * bs + oy),
-					int(std::min((bx + 1) * bs, int64_t(header.sizex))), int(std::min((by + 1) * bs, int64_t(header.sizey))),
+					encode(auxImage, streamBlock[block], (bx * step << header.blockSize) + ox, (by * step << header.blockSize) + oy, bx1, by1,
 					2 * step, header.encoder, (ox || oy) ? chromaQuality : header.quality, hasDC && !bx && !by, ox || oy);
 				streamBlock[block].flushWriteWord();
 			}
@@ -867,19 +867,18 @@ namespace GFWX
 			if (stream.buffer <= stream.bufferEnd)
 				isTruncated = false;
 			int const stepDown = step >> downsampling;
-			int64_t const bsDown = int64_t(stepDown) << header.blockSize;
 			#pragma omp parallel for schedule(dynamic, 4)	// [MAGIC] for some reason, 4 is by far the best option here
 			for (int block = 0; block < blockCount; ++ block) if (!test && streamBlock[block].bufferEnd <= stream.bufferEnd)
 			{
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
+				int const bx1 = (bx + 1) * stepDown > sizexDown >> header.blockSize ? sizexDown : (bx + 1) * stepDown << header.blockSize;
+				int const by1 = (by + 1) * stepDown > sizeyDown >> header.blockSize ? sizeyDown : (by + 1) * stepDown << header.blockSize;
 				Image<aux> auxImage(&auxData[c * bufferSize], sizexDown, sizeyDown);
 				if (header.intent < IntentBayerRGGB || header.intent > IntentBayerGeneric)
-					decode(auxImage, streamBlock[block], int(bx * bsDown), int(by * bsDown),
-					int(std::min((bx + 1) * bsDown, int64_t(sizexDown))), int(std::min((by + 1) * bsDown, int64_t(sizeyDown))),
+					decode(auxImage, streamBlock[block], bx * stepDown << header.blockSize, by * stepDown << header.blockSize, bx1, by1,
 					stepDown, header.encoder, isChroma[c] ? chromaQuality : header.quality, hasDC && !bx && !by, isChroma[c] != 0);
 				else for (int ox = 0; ox <= 1; ++ ox) for (int oy = 0; oy <= 1; ++ oy)
-					decode(auxImage, streamBlock[block], int(bx * bsDown + ox), int(by * bsDown + oy),
-					int(std::min((bx + 1) * bsDown, int64_t(sizexDown))), int(std::min((by + 1) * bsDown, int64_t(sizeyDown))),
+					decode(auxImage, streamBlock[block], (bx * stepDown << header.blockSize) + ox, (by * stepDown << header.blockSize) + oy, bx1, by1,
 					2 * stepDown, header.encoder, (ox || oy) ? chromaQuality : header.quality, hasDC && !bx && !by, ox || oy);
 			}
 			for (int block = 0; block < blockCount; ++ block)	// check if any blocks ran out of buffer, which should not happen on valid files
@@ -905,7 +904,7 @@ namespace GFWX
 					(isChroma[c] ? chromaQuality : header.quality) << downsampling, 0, QualityMax * boost);
 			unlift(auxImage, 0, 0, sizexDown, sizeyDown, 1, header.filter);
 		}
-		for (int s = (int)transformSteps.size() - 1; s >= 0; -- s)	// run color transform program in reverse
+		for (int s = int(transformSteps.size()) - 1; s >= 0; -- s)	// run color transform program in reverse
 		{
 			int * pc = &transformProgram[transformSteps[s]];
 			int const c = *(pc ++);
