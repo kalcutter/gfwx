@@ -49,8 +49,16 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#if defined(_OPENMP)
+#if defined(_OPENMP) && defined(_MSC_VER)
+#define OMP_PARALLEL_FOR(X) __pragma(omp parallel for schedule(dynamic, X))
+#elif defined(_OPENMP)
 #include <omp.h>
+#define STR(X) #X
+#define STRINGIFY(X) STR(X)
+#define TWO_ARGUMENTS(X,Y,Z) X(Y, Z)
+#define OMP_PARALLEL_FOR(X) _Pragma(STRINGIFY(TWO_ARGUMENTS(omp parallel for schedule, dynamic, X)))
+#else
+#define OMP_PARALLEL_FOR(X)
 #endif
 
 namespace GFWX
@@ -239,7 +247,7 @@ namespace GFWX
 		{
 			if (step < sizex)	// horizontal lifting
 			{
-				#pragma omp parallel for schedule(dynamic, ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations)
 				for (int y = 0; y < sizey; y += step)
 				{
 					int x;
@@ -272,7 +280,7 @@ namespace GFWX
 			}
 			if (step < sizey)	// vertical lifting
 			{
-				#pragma omp parallel for schedule(dynamic, ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations)
 				for (int y = step; y < sizey; y += step * 2)
 				{
 					T * const base = &image[y0 + y][x0];
@@ -287,7 +295,7 @@ namespace GFWX
 					else for (int x = 0; x < sizex; x += step)
 						base[x] -= (c1base[x] + c2base[x]) / 2;
 				}
-				#pragma omp parallel for schedule(dynamic, ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations)
 				for (int y = step * 2; y < sizey; y += step * 2)
 				{
 					T * const base = &image[y0 + y][x0];
@@ -318,7 +326,7 @@ namespace GFWX
 		{
 			if (step < sizey)	// vertical unlifting
 			{
-				#pragma omp parallel for schedule(dynamic, ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations)
 				for (int y = step * 2; y < sizey; y += step * 2)
 				{
 					T * const base = &image[y0 + y][x0];
@@ -333,7 +341,7 @@ namespace GFWX
 					else for (int x = 0; x < sizex; x += step)
 						base[x] -= (g1base[x] + g2base[x]) / 4;
 				}
-				#pragma omp parallel for schedule(dynamic, ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations)
 				for (int y = step; y < sizey; y += step * 2)
 				{
 					T * const base = &image[y0 + y][x0];
@@ -351,7 +359,7 @@ namespace GFWX
 			}
 			if (step < sizex)	// horizontal unlifting
 			{
-				#pragma omp parallel for schedule(dynamic, ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations)
 				for (int y = 0; y < sizey; y += step)
 				{
 					int x;
@@ -396,7 +404,7 @@ namespace GFWX
 		{
 			int const q = std::max(std::max(1, minQ), quality);
 			if (q >= maxQ) break;
-			#pragma omp parallel for schedule(dynamic, ThreadIterations)
+			OMP_PARALLEL_FOR(ThreadIterations)
 			for (int y = 0; y < sizey; y += skip)
 			{
 				T * base = &image[y0 + y][x0];
@@ -621,7 +629,7 @@ namespace GFWX
 
 	template<typename T> void shiftVector(T * data, int shift, int count)
 	{
-		#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+		OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 		for (int i = 0; i < count; ++ i)
 			data[i] >>= shift;
 	}
@@ -637,14 +645,14 @@ namespace GFWX
 			{
 				auto layer = imageData + ((c / header.channels) * bufferSize * header.channels + c % header.channels);
 				A const boostFactor = boost * factor;
-				#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 				for (int i = 0; i < bufferSize; ++ i)
 					destination[i] += layer[i * header.channels] * boostFactor;
 			}
 			else
 			{
 				A const * auxDataC = auxData + c * bufferSize;
-				#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 				for (int i = 0; i < bufferSize; ++ i)
 					destination[i] += auxDataC[i] * factor;
 			}
@@ -658,7 +666,7 @@ namespace GFWX
 			shiftVector(destination, 3, bufferSize);
 		else if (denom > 1)	// [NOTE] disallow non-positive denominators
 		{
-			#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+			OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 			for (int i = 0; i < bufferSize; ++ i)
 				destination[i] /= denom;
 		}
@@ -707,7 +715,7 @@ namespace GFWX
 				aux * destination = &auxData[c * bufferSize];
 				transformTerm(pc, destination, &auxData[0], bufferSize, imageData, header, isChroma, boost);
 				auto layer = imageData + ((c / header.channels) * bufferSize * header.channels + c % header.channels);
-				#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 				for (int i = 0; i < bufferSize; ++ i)
 					destination[i] += layer[i * header.channels] * boost;
 				isChroma[c] = *(pc ++);
@@ -722,7 +730,7 @@ namespace GFWX
 		{
 			aux * destination = &auxData[c * bufferSize];
 			auto layer = imageData + ((c / header.channels) * bufferSize * header.channels + c % header.channels);
-			#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+			OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 			for (int i = 0; i < bufferSize; ++ i)
 				destination[i] = layer[i * header.channels] * boost;
 			isChroma[c] = 0;
@@ -759,7 +767,7 @@ namespace GFWX
 				streamBlock[block].buffer = blockBegin + (stream.bufferEnd - blockBegin) * block / blockCount;
 			for (int block = 0; block < blockCount; ++ block)
 				streamBlock[block].bufferEnd = block + 1 < blockCount ? streamBlock[block + 1].buffer : stream.bufferEnd;
-			#pragma omp parallel for schedule(dynamic, 4)	// [MAGIC] for some reason, 4 is by far the best option here
+			OMP_PARALLEL_FOR(4)	// [MAGIC] for some reason, 4 is by far the best option here
 			for (int block = 0; block < blockCount; ++ block)
 			{
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
@@ -867,7 +875,7 @@ namespace GFWX
 			if (stream.buffer <= stream.bufferEnd)
 				isTruncated = false;
 			int const stepDown = step >> downsampling;
-			#pragma omp parallel for schedule(dynamic, 4)	// [MAGIC] for some reason, 4 is by far the best option here
+			OMP_PARALLEL_FOR(4)	// [MAGIC] for some reason, 4 is by far the best option here
 			for (int block = 0; block < blockCount; ++ block) if (!test && streamBlock[block].bufferEnd <= stream.bufferEnd)
 			{
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
@@ -911,7 +919,7 @@ namespace GFWX
 			std::vector<aux> transformTemp(bufferSize, 0);
 			transformTerm(pc, &transformTemp[0], &auxData[0], bufferSize, imageData, header, isChroma, boost);
 			aux * destination = &auxData[c * bufferSize];
-			#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+			OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 			for (int i = 0; i < bufferSize; ++ i)
 				destination[i] -= transformTemp[i];
 		}
@@ -921,14 +929,14 @@ namespace GFWX
 			auto layer = imageData + ((c / header.channels) * bufferSize * header.channels + c % header.channels);
 			if (boost == 1)
 			{
-				#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 				for (int i = 0; i < bufferSize; ++ i)
 					layer[i * header.channels] = static_cast<base>(std::max(static_cast<aux>(std::numeric_limits<base>::lowest()),
 						std::min(static_cast<aux>(std::numeric_limits<base>::max()), static_cast<aux>(destination[i]))));
 			}
 			else
 			{
-				#pragma omp parallel for schedule(dynamic, ThreadIterations * ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 				for (int i = 0; i < bufferSize; ++ i)
 					layer[i * header.channels] = static_cast<base>(std::max(static_cast<aux>(std::numeric_limits<base>::lowest()),
 						std::min(static_cast<aux>(std::numeric_limits<base>::max()), static_cast<aux>(destination[i] / boost))));
@@ -937,7 +945,7 @@ namespace GFWX
 			{
 				int const bayerNoiseThresh = ((QualityMax + header.quality / 2) / header.quality + (QualityMax + chromaQuality / 2) / chromaQuality) * 2;
 				Image<aux> auxImage(&auxData[c * bufferSize], sizexDown, sizeyDown);
-				#pragma omp parallel for schedule(dynamic, ThreadIterations)
+				OMP_PARALLEL_FOR(ThreadIterations)
 				for (int y = 1; y < sizeyDown - 1; ++ y)
 					for (int x = 1 + (y + (header.intent == IntentBayerGBRG || header.intent == IntentBayerGRBG ? 1 : 0)) % 2; x < sizexDown - 1; x += 2)
 					{
