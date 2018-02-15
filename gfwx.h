@@ -1,7 +1,7 @@
 //  Good, Fast Wavelet Codec "GFWX" v1
 //  ----------------------------------
-//  December 1, 2015
-//  Author: Graham Fyffe <fyffe@ict.usc.edu> or <gfyffe@gmail.com>
+//  December 1, 2015 [patched on Oct 20, 2017]
+//  Author: Graham Fyffe <gfyffe@gmail.com> or <fyffe@google.com>, and Google, Inc.
 //  Website: www.gfwx.org
 //  Features:
 //  - FAST
@@ -83,6 +83,12 @@ namespace GFWX
 			: sizex(sizex), sizey(sizey), layers(layers), channels(channels), bitDepth(bitDepth), quality(std::max(1, std::min(int(QualityMax), quality))),
 			chromaScale(std::max(1, std::min(256, chromaScale))), blockSize(std::min(30, std::max(2, blockSize))), filter(std::min(255, filter)),
 			quantization(std::min(255, quantization)), encoder(std::min(255, encoder)), intent(std::min(255, intent)) {}
+    size_t bufferSize() const
+    {
+      size_t const part1 = static_cast<size_t>(sizex) * sizey;
+      size_t const part2 = static_cast<size_t>(channels) * layers * ((bitDepth + 7) / 8);
+      return std::log(part1) + std::log(part2) > std::log(std::numeric_limits<size_t>::max() - 1) ? 0 : part1 * part2;
+    }
 	};
 
 	template<typename T> struct Image	// handy wrapper for 2D image data
@@ -90,7 +96,7 @@ namespace GFWX
 		T * data;
 		int sizex, sizey;
 		Image(T * data, int sizex, int sizey) : data(data), sizex(sizex), sizey(sizey) {}
-		T * operator[] (int y) { return data + y * sizex; }
+		T * operator[] (int y) { return data + static_cast<size_t>(y) * sizex; }
 	};
 
 	struct Bits	// handy wrapper for treating an array of unsigned ints as a bit stream
@@ -197,7 +203,8 @@ namespace GFWX
 	template<int pot> uint32_t unsignedDecode(Bits & stream)
 	{
 		uint32_t x = stream.getZeros(12);
-		return (x == 12) ? (12 << (pot)) + unsignedDecode<pot < 20 ? pot + 4 : 24>(stream) : pot ? (x << (pot)) + stream.getBits(pot) : x;
+    int const p = pot < 24 ? pot : 24;  // actual pot. The max 108 below is to prevent unlimited recursion in malformed files, yet admit 2^32 - 1.
+		return (pot < 108 && x == 12) ? (12 << p) + unsignedDecode<pot < 108 ? pot + 4 : 108>(stream) : p ? (x << p) + stream.getBits(p) : x;
 	}
 
 	template<int pot> void interleavedCode(int x, Bits & stream)
@@ -410,7 +417,7 @@ namespace GFWX
 				T * base = &image[y0 + y][x0];
 				int const xStep = (y & skip) ? skip : skip * 2;
 				for (int x = xStep - skip; x < sizex; x += xStep)	// [NOTE] arranged so that (x | y) & skip == 1
-					base[x] = T(dequantize ? (aux(base[x]) * maxQ + (base[x] < 0 ? -maxQ / 2 : base[x] > 0 ? maxQ / 2 : 0)) / q : aux(base[x]) * q / maxQ);
+					base[x] = dequantize ? (aux(base[x]) * maxQ + (base[x] < 0 ? -maxQ / 2 : base[x] > 0 ? maxQ / 2 : 0)) / q : aux(base[x]) * q / maxQ;
 			}
 			skip *= 2;
 			quality = std::min(maxQ, quality * 2);	// [MAGIC] This approximates the JPEG 2000 baseline quantizer
@@ -468,10 +475,10 @@ namespace GFWX
 	{
 		int const sizex = x1 - x0;
 		int const sizey = y1 - y0;
-		if (hasDC)
+		if (hasDC && sizex > 0 && sizey > 0)
 			signedCode<4>(image[y0][x0], stream);
 		std::pair<uint32_t, uint32_t> context(0, 0);
-		int run = 0, runCoder = (scheme == EncoderTurbo ? q * step < 2048 ? 1 : 0 : 0);
+		int run = 0, runCoder = (scheme == EncoderTurbo ? (!q || (step < 2048 && q * step < 2048)) ? 1 : 0 : 0);  // avoid overflow checking q * step < 2048
 		for (int y = 0; y < sizey; y += step)
 		{
 			T * base = &image[y0 + y][x0];
@@ -555,10 +562,10 @@ namespace GFWX
 	{
 		int const sizex = x1 - x0;
 		int const sizey = y1 - y0;
-		if (hasDC)
+		if (hasDC && sizex > 0 && sizey > 0)
 			image[y0][x0] = signedDecode<4>(stream);
 		std::pair<uint32_t, uint32_t> context(0, 0);
-		int run = -1, runCoder = (scheme == EncoderTurbo ? q * step < 2048 ? 1 : 0 : 0);
+		int run = -1, runCoder = (scheme == EncoderTurbo ? (!q || (step < 2048 && q * step < 2048)) ? 1 : 0 : 0);  // avoid overflow checking q * step < 2048
 		for (int y = 0; y < sizey; y += step)
 		{
 			T * base = &image[y0 + y][x0];
@@ -634,10 +641,10 @@ namespace GFWX
 			data[i] >>= shift;
 	}
 
-	template<typename I, typename A> void transformTerm(int * & pc, A * destination, A const * auxData, int const bufferSize,
+	template<typename I, typename A> void transformTerm(int const * & pc, A * destination, A const * auxData, int const bufferSize,
 		I const & imageData, Header const & header, std::vector<int> const & isChroma, int boost)
 	{
-		while (*pc != -1)
+		while (*pc >= 0)
 		{
 			int const c = *(pc ++);
 			A const factor = *(pc ++);
@@ -679,10 +686,12 @@ namespace GFWX
 	#define GFWX_TRANSFORM_A710_RGB { 0, 1, -1, -1, 1, 1, 2, 1, -2, 0, -1, -1, 2, 1, 1, 2, 2, 0, 3, -1, 8, 0, -1 }
 
 	template<typename I> ptrdiff_t compress(I const & imageData, Header & header, uint8_t * buffer, size_t size,
-		int * channelTransform, uint8_t * metaData, size_t metaDataSize)
+		int const * channelTransform, uint8_t * metaData, size_t metaDataSize)
 	{
 		typedef typename std::remove_reference<decltype(imageData[0])>::type base;
 		typedef typename std::conditional<sizeof(base) < 2, int16_t, int32_t>::type aux;
+    if (header.sizex > (1 << 30) || header.sizey > (1 << 30))  // [NOTE] current implementation can't go over 2^30
+      return ErrorMalformed;
 		Bits stream(reinterpret_cast<uint32_t *>(buffer), reinterpret_cast<uint32_t *>(buffer) + size / 4);
 		stream.putBits('G' | ('F' << 8) | ('W' << 16) | ('X' << 24), 32);
 		stream.putBits(header.version = 1, 32);
@@ -708,8 +717,8 @@ namespace GFWX
 		int const boost = header.quality == QualityMax ? 1 : 8;	// [NOTE] due to Cubic lifting max multiplier of 20, boost * 20 must be less than 256
 		if (channelTransform)	// run color transform program (and also encode it to the file)
 		{
-			int * pc = channelTransform;
-			while (*pc != -1)
+			int const * pc = channelTransform;
+			while (*pc >= 0)
 			{
 				int const c = *(pc ++);
 				aux * destination = &auxData[c * bufferSize];
@@ -720,7 +729,7 @@ namespace GFWX
 					destination[i] += layer[i * header.channels] * boost;
 				isChroma[c] = *(pc ++);
 			}
-			for (int * i = channelTransform; i <= pc; ++ i)
+			for (int const * i = channelTransform; i <= pc; ++ i)
 				signedCode<2>(*i, stream);
 		}
 		else
@@ -756,8 +765,8 @@ namespace GFWX
 		for (bool hasDC = true; step >= 1; hasDC = false)
 		{
 			int64_t const bs = int64_t(step) << header.blockSize;
-			int const blockCountX = int((header.sizex + bs - 1) / bs);
-			int const blockCountY = int((header.sizey + bs - 1) / bs);
+			int const blockCountX = (header.sizex + bs - 1) / bs;
+			int const blockCountY = (header.sizey + bs - 1) / bs;
 			int const blockCount = blockCountX * blockCountY * header.layers * header.channels;
 			std::vector<Bits> streamBlock(blockCount, Bits(0, 0));
 			uint32_t * blockBegin = stream.buffer + blockCount;	// leave space for block sizes
@@ -771,14 +780,14 @@ namespace GFWX
 			for (int block = 0; block < blockCount; ++ block)
 			{
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
-				int const bx1 = (bx + 1) * step > header.sizex >> header.blockSize ? header.sizex : (bx + 1) * step << header.blockSize;
-				int const by1 = (by + 1) * step > header.sizey >> header.blockSize ? header.sizey : (by + 1) * step << header.blockSize;
 				Image<aux> auxImage(&auxData[c * bufferSize], header.sizex, header.sizey);
 				if (header.intent < IntentBayerRGGB || header.intent > IntentBayerGeneric)
-					encode(auxImage, streamBlock[block], bx * step << header.blockSize, by * step << header.blockSize, bx1, by1,
+					encode(auxImage, streamBlock[block], bx * bs, by * bs,
+					int(std::min((bx + 1) * bs, int64_t(header.sizex))), int(std::min((by + 1) * bs, int64_t(header.sizey))),
 					step, header.encoder, isChroma[c] ? chromaQuality : header.quality, hasDC && !bx && !by, isChroma[c] != 0);
 				else for (int ox = 0; ox <= 1; ++ ox) for (int oy = 0; oy <= 1; ++ oy)
-					encode(auxImage, streamBlock[block], (bx * step << header.blockSize) + ox, (by * step << header.blockSize) + oy, bx1, by1,
+					encode(auxImage, streamBlock[block], bx * bs + ox, by * bs + oy,
+					int(std::min((bx + 1) * bs, int64_t(header.sizex))), int(std::min((by + 1) * bs, int64_t(header.sizey))),
 					2 * step, header.encoder, (ox || oy) ? chromaQuality : header.quality, hasDC && !bx && !by, ox || oy);
 				streamBlock[block].flushWriteWord();
 			}
@@ -817,6 +826,8 @@ namespace GFWX
 		header.quantization = stream.getBits(8);
 		header.encoder = stream.getBits(8);
 		header.intent = stream.getBits(8);
+    if (header.sizex < 0 || header.sizex > (1 << 30) || header.sizey < 0 || header.sizey > (1 << 30) || header.bufferSize() == 0)
+      return ErrorMalformed;  // [NOTE] current implementation can't go over 2^30
 		if (!imageData)		// just header
 			return ResultOk;
 		if (header.isSigned != (std::numeric_limits<base>::is_signed ? 1 : 0) || header.bitDepth > std::numeric_limits<base>::digits)
@@ -832,7 +843,9 @@ namespace GFWX
 		while (true)	// decode color transform program (including isChroma flags)
 		{
 			transformProgram.push_back(signedDecode<2>(stream));	// channel
-			if (transformProgram.back() == -1)
+			if (transformProgram.back() >= static_cast<int>(isChroma.size()))
+          return ErrorMalformed;
+			if (transformProgram.back() < 0)
 				break;
 			transformSteps.push_back(int(transformProgram.size()) - 1);
 			while (true)
@@ -840,7 +853,9 @@ namespace GFWX
 				if (stream.indexBits < 0)	// test for truncation
 					return nextPointOfInterest;	// need more data
 				transformProgram.push_back(signedDecode<2>(stream));	// other channel
-				if (transformProgram.back() == -1)
+        if (transformProgram.back() >= static_cast<int>(isChroma.size()))
+            return ErrorMalformed;
+				if (transformProgram.back() < 0)
 					break;
 				transformProgram.push_back(signedDecode<2>(stream));	// factor
 			}
@@ -875,18 +890,19 @@ namespace GFWX
 			if (stream.buffer <= stream.bufferEnd)
 				isTruncated = false;
 			int const stepDown = step >> downsampling;
+			int64_t const bsDown = int64_t(stepDown) << header.blockSize;
 			OMP_PARALLEL_FOR(4)	// [MAGIC] for some reason, 4 is by far the best option here
 			for (int block = 0; block < blockCount; ++ block) if (!test && streamBlock[block].bufferEnd <= stream.bufferEnd)
 			{
 				int const bx = block % blockCountX, by = (block / blockCountX) % blockCountY, c = block / (blockCountX * blockCountY);
-				int const bx1 = (bx + 1) * stepDown > sizexDown >> header.blockSize ? sizexDown : (bx + 1) * stepDown << header.blockSize;
-				int const by1 = (by + 1) * stepDown > sizeyDown >> header.blockSize ? sizeyDown : (by + 1) * stepDown << header.blockSize;
 				Image<aux> auxImage(&auxData[c * bufferSize], sizexDown, sizeyDown);
 				if (header.intent < IntentBayerRGGB || header.intent > IntentBayerGeneric)
-					decode(auxImage, streamBlock[block], bx * stepDown << header.blockSize, by * stepDown << header.blockSize, bx1, by1,
+					decode(auxImage, streamBlock[block], int(bx * bsDown), int(by * bsDown),
+					int(std::min((bx + 1) * bsDown, int64_t(sizexDown))), int(std::min((by + 1) * bsDown, int64_t(sizeyDown))),
 					stepDown, header.encoder, isChroma[c] ? chromaQuality : header.quality, hasDC && !bx && !by, isChroma[c] != 0);
 				else for (int ox = 0; ox <= 1; ++ ox) for (int oy = 0; oy <= 1; ++ oy)
-					decode(auxImage, streamBlock[block], (bx * stepDown << header.blockSize) + ox, (by * stepDown << header.blockSize) + oy, bx1, by1,
+					decode(auxImage, streamBlock[block], int(bx * bsDown + ox), int(by * bsDown + oy),
+					int(std::min((bx + 1) * bsDown, int64_t(sizexDown))), int(std::min((by + 1) * bsDown, int64_t(sizeyDown))),
 					2 * stepDown, header.encoder, (ox || oy) ? chromaQuality : header.quality, hasDC && !bx && !by, ox || oy);
 			}
 			for (int block = 0; block < blockCount; ++ block)	// check if any blocks ran out of buffer, which should not happen on valid files
@@ -912,9 +928,9 @@ namespace GFWX
 					(isChroma[c] ? chromaQuality : header.quality) << downsampling, 0, QualityMax * boost);
 			unlift(auxImage, 0, 0, sizexDown, sizeyDown, 1, header.filter);
 		}
-		for (int s = int(transformSteps.size()) - 1; s >= 0; -- s)	// run color transform program in reverse
+		for (int s = (int)transformSteps.size() - 1; s >= 0; -- s)	// run color transform program in reverse
 		{
-			int * pc = &transformProgram[transformSteps[s]];
+			int const * pc = &transformProgram[transformSteps[s]];
 			int const c = *(pc ++);
 			std::vector<aux> transformTemp(bufferSize, 0);
 			transformTerm(pc, &transformTemp[0], &auxData[0], bufferSize, imageData, header, isChroma, boost);
