@@ -1,7 +1,7 @@
-//  Good, Fast Wavelet Codec "GFWX" v1
+//  Good, Fast Wavelet Codec "GFWX" v2
 //  ----------------------------------
-//  December 1, 2015 [patched on December 28, 2019]
-//  Author: Graham Fyffe <gfyffe@gmail.com> or <fyffe@google.com>, and Google, Inc.
+//  December 1, 2015 [patched on December 28, 2019 and Aug 23, 2023]
+//  Author: Graham Fyffe <gfyffe@gmail.com>, Google LLC, and Apple Inc.
 //  Website: www.gfwx.org
 //  Features:
 //  - FAST
@@ -28,10 +28,10 @@
 //  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
 //
 //  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in
-//     the documentation and/or other materials provided with the distribution.
+//	 the documentation and/or other materials provided with the distribution.
 //
 //  3. Neither the name of the organization nor the names of its contributors may be used to endorse or promote products derived from
-//     this software without specific prior written permission.
+//	 this software without specific prior written permission.
 //
 //  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 //  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
@@ -42,6 +42,7 @@
 
 #pragma once
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -69,10 +70,10 @@ namespace GFWX
 		QualityMax = 1024,		// compress with QualityMax for 100% lossless, or less than QualityMax for lossy
 		ThreadIterations = 64,	// OMP settings tuned on my machine with large images
 		BitDepthAuto = 0, BlockDefault = 7, BlockMax = 30,
-		FilterLinear = 0, FilterCubic = 1, QuantizationScalar = 0, EncoderTurbo = 0, EncoderFast = 1, EncoderContextual = 2,
+		FilterLinear = 0, FilterCubic = 1, QuantizationScalar = 0, EncoderTurbo = 0, EncoderFast = 1, EncoderContextual = 2, EncoderHighBitrate = 3,
 		IntentGeneric = 0, IntentMono = 1, IntentBayerRGGB = 2, IntentBayerBGGR = 3, IntentBayerGRBG = 4, IntentBayerGBRG = 5, IntentBayerGeneric = 6,
 		IntentRGB = 7, IntentRGBA = 8, IntentRGBApremult = 9, IntentBGR = 10, IntentBGRA = 11, IntentBGRApremult = 12, IntentCMYK = 13,
-		ResultOk = 0, ErrorOverflow = -1, ErrorMalformed = -2, ErrorTypeMismatch = -3
+		ResultOk = 0, ErrorOverflow = -1, ErrorMalformed = -2, ErrorTypeMismatch = -3, ErrorUnsupported = -4
 	};
 
 	struct Header	// use the empty constructor to fetch headers before decompressing, and use the parameterized constructor when compressing
@@ -189,46 +190,46 @@ namespace GFWX
 		}
 	};
 
-	template<int pot> void unsignedCode(uint32_t x, Bits & stream)	// limited length power-of-two Golomb-Rice code
+	inline void unsignedCode(int pot, uint32_t x, Bits & stream)	// limited length power-of-two Golomb-Rice code
 	{
 		uint32_t const y = x >> (pot);
 		if (y >= 12)
 		{
 			stream.putBits(0, 12);	// escape to larger code
-			unsignedCode<pot < 20 ? pot + 4 : 24>(x - (12 << (pot)), stream);
+			unsignedCode(pot < 20 ? pot + 4 : 24, x - (12 << (pot)), stream);
 		}
 		else
 			stream.putBits((1 << (pot)) | (x & ~(~0u << (pot))), y + 1 + pot);	// encode x / 2^pot in unary followed by x % 2^pot in binary
 	}
 
-	template<int pot> uint32_t unsignedDecode(Bits & stream)
+	inline uint32_t unsignedDecode(int pot, Bits & stream)
 	{
 		uint32_t const x = stream.getZeros(12);
 		int const p = pot < 24 ? pot : 24;  // actual pot. The max 108 below is to prevent unlimited recursion in malformed files, yet admit 2^32 - 1.
-		return (pot < 108 && x == 12) ? (12 << p) + unsignedDecode<pot < 108 ? pot + 4 : 108>(stream) : p ? (x << p) + stream.getBits(p) : x;
+		return (pot < 108 && x == 12) ? (12 << p) + unsignedDecode(pot < 108 ? pot + 4 : 108, stream) : p ? (x << p) + stream.getBits(p) : x;
 	}
 
-	template<int pot> void interleavedCode(int x, Bits & stream)
+	inline void interleavedCode(int pot, int x, Bits & stream)
 	{
-		unsignedCode<pot>(x <= 0 ? -2 * x : 2 * x - 1, stream);	// interleave positive and negative values
+		unsignedCode(pot, x <= 0 ? -2 * x : 2 * x - 1, stream);	// interleave positive and negative values
 	}
 
-	template<int pot> int interleavedDecode(Bits & stream)
+	inline int interleavedDecode(int pot, Bits & stream)
 	{
-		uint32_t const x = unsignedDecode<pot>(stream);
+		uint32_t const x = unsignedDecode(pot, stream);
 		return (x & 1) ? static_cast<int>(x / 2 + 1) : -static_cast<int>(x / 2);
 	}
 
-	template<int pot> void signedCode(int x, Bits & stream)
+	inline void signedCode(int pot, int x, Bits & stream)
 	{
-		unsignedCode<pot>(abs(x), stream);
+		unsignedCode(pot, abs(x), stream);
 		if (x)
 			stream.putBits(x > 0 ? 1 : 0, 1);
 	}
 
-	template<int pot> int signedDecode(Bits & stream)
+	inline int signedDecode(int pot, Bits & stream)
 	{
-		uint32_t const x = unsignedDecode<pot>(stream);
+		uint32_t const x = unsignedDecode(pot, stream);
 		return x ? stream.getBits(1) ? static_cast<int>(x) : -static_cast<int>(x) : 0;
 	}
 
@@ -477,9 +478,9 @@ namespace GFWX
 		int const sizex = x1 - x0;
 		int const sizey = y1 - y0;
 		if (hasDC && sizex > 0 && sizey > 0)
-			signedCode<4>(image[y0][x0], stream);
+			signedCode(4, image[y0][x0], stream);
 		std::pair<uint32_t, uint32_t> context(0, 0);
-		int run = 0, runCoder = (scheme == EncoderTurbo ? (!q || (step < 2048 && q * step < 2048)) ? 1 : 0 : 0);  // avoid overflow checking q * step < 2048
+		int run = 0, runCoder = 0;
 		for (int y = 0; y < sizey; y += step)
 		{
 			T * base = &image[y0 + y][x0];
@@ -491,22 +492,15 @@ namespace GFWX
 					++ run;
 				else
 				{
-					if (scheme == EncoderTurbo)
+					if (scheme == EncoderHighBitrate)
 					{
-						if (runCoder)	// break the run
-						{
-							unsignedCode<1>(run, stream);
-							run = 0;
-							interleavedCode<1>(s < 0 ? s + 1 : s, stream);	// s can't be zero, so shift negatives by 1
-						}
-						else
-							interleavedCode<1>(s, stream);
+						interleavedCode(std::max(0, (int)std::bit_width(context.first) - 4), s, stream);
+						context.first = ((context.first * 15u + 7u) >> 4) + static_cast<uint32_t>(abs(s));
 						continue;
 					}
 					if (runCoder)	// break the run
 					{
-						runCoder == 1 ? unsignedCode<1>(run, stream) : runCoder == 2 ? unsignedCode<2>(run, stream)
-							: runCoder == 3 ? unsignedCode<3>(run, stream) : unsignedCode<4>(run, stream);
+						unsignedCode(runCoder, run, stream);
 						run = 0;
 						if (s < 0)
 							++ s;	// s can't be zero, so shift negatives by 1
@@ -515,32 +509,32 @@ namespace GFWX
 						context = getContext(image, x0, y0, x1, y1, x, y, step);
 					uint32_t const sumSq = square(context.first);
 					if (sumSq < 2u * context.second + (isChroma ? 250u : 100u))
-						interleavedCode<0>(s, stream);
+						interleavedCode(0, s, stream);
 					else if (sumSq < 2u * context.second + 950u)
-						interleavedCode<1>(s, stream);
+						interleavedCode(1, s, stream);
 					else if (sumSq < 3u * context.second + 3000u)
 					{
 						if (sumSq < 5u * context.second + 400u)
-							signedCode<1>(s, stream);
+							signedCode(1, s, stream);
 						else
-							interleavedCode<2>(s, stream);
+							interleavedCode(2, s, stream);
 					}
 					else if (sumSq < 3u * context.second + 12000u)
 					{
 						if (sumSq < 5u * context.second + 3000u)
-							signedCode<2>(s, stream);
+							signedCode(2, s, stream);
 						else
-							interleavedCode<3>(s, stream);
+							interleavedCode(3, s, stream);
 					}
 					else if (sumSq < 4u * context.second + 44000u)
 					{
 						if (sumSq < 6u * context.second + 12000u)
-							signedCode<3>(s, stream);
+							signedCode(3, s, stream);
 						else
-							interleavedCode<4>(s, stream);
+							interleavedCode(4, s, stream);
 					}
 					else
-						signedCode<4>(s, stream);
+						signedCode(4, s, stream);
 					if (scheme == EncoderFast)	// use decaying first and second moment
 					{
 						uint32_t const t = abs(s);
@@ -555,8 +549,7 @@ namespace GFWX
 			}
 		}
 		if (run)	// flush run
-			runCoder == 1 ? unsignedCode<1>(run, stream) : runCoder == 2 ? unsignedCode<2>(run, stream)
-				: runCoder == 3 ? unsignedCode<3>(run, stream) : unsignedCode<4>(run, stream);
+			unsignedCode(runCoder, run, stream);
 	}
 
 	template<typename T> void decode(Image<T> & image, Bits & stream, int x0, int y0, int x1, int y1, int step, int scheme, int q, bool hasDC, bool isChroma)
@@ -564,7 +557,7 @@ namespace GFWX
 		int const sizex = x1 - x0;
 		int const sizey = y1 - y0;
 		if (hasDC && sizex > 0 && sizey > 0)
-			image[y0][x0] = signedDecode<4>(stream);
+			image[y0][x0] = signedDecode(4, stream);
 		std::pair<uint32_t, uint32_t> context(0, 0);
 		int run = -1, runCoder = (scheme == EncoderTurbo ? (!q || (step < 2048 && q * step < 2048)) ? 1 : 0 : 0);  // avoid overflow checking q * step < 2048
 		for (int y = 0; y < sizey; y += step)
@@ -575,46 +568,50 @@ namespace GFWX
 			{
 				T s = 0;
 				if (runCoder && run == -1)
-					run = runCoder == 1 ? unsignedDecode<1>(stream) : runCoder == 2 ? unsignedDecode<2>(stream)
-						: runCoder == 3 ? unsignedDecode<3>(stream) : unsignedDecode<4>(stream);
+					run = unsignedDecode(runCoder, stream);
 				if (run > 0)
 					-- run;	// consume a zero
 				else
 				{
 					if (scheme == EncoderTurbo)
-						s = interleavedDecode<1>(stream);
+						s = interleavedDecode(1, stream);
+					else if (scheme == EncoderHighBitrate)
+					{
+						s = interleavedDecode(std::max(0, (int)std::bit_width(context.first) - 4), stream);
+						context.first = ((context.first * 15u + 7u) >> 4) + static_cast<uint32_t>(abs(s));
+					}
 					else
 					{
 						if (scheme == EncoderContextual)
 							context = getContext(image, x0, y0, x1, y1, x, y, step);
 						uint32_t const sumSq = square(context.first);
 						if (sumSq < 2u * context.second + (isChroma ? 250u : 100u))
-							s = interleavedDecode<0>(stream);
+							s = interleavedDecode(0, stream);
 						else if (sumSq < 2u * context.second + 950u)
-							s = interleavedDecode<1>(stream);
+							s = interleavedDecode(1, stream);
 						else if (sumSq < 3u * context.second + 3000u)
 						{
 							if (sumSq < 5u * context.second + 400u)
-								s = signedDecode<1>(stream);
+								s = signedDecode(1, stream);
 							else
-								s = interleavedDecode<2>(stream);
+								s = interleavedDecode(2, stream);
 						}
 						else if (sumSq < 3u * context.second + 12000u)
 						{
 							if (sumSq < 5u * context.second + 3000u)
-								s = signedDecode<2>(stream);
+								s = signedDecode(2, stream);
 							else
-								s = interleavedDecode<3>(stream);
+								s = interleavedDecode(3, stream);
 						}
 						else if (sumSq < 4u * context.second + 44000u)
 						{
 							if (sumSq < 6u * context.second + 12000u)
-								s = signedDecode<3>(stream);
+								s = signedDecode(3, stream);
 							else
-								s = interleavedDecode<4>(stream);
+								s = interleavedDecode(4, stream);
 						}
 						else
-							s = signedDecode<4>(stream);
+							s = signedDecode(4, stream);
 						if (scheme == EncoderFast)	// use decaying first and second moment
 						{
 							uint32_t const t = abs(s);
@@ -642,7 +639,7 @@ namespace GFWX
 			data[i] >>= shift;
 	}
 
-	template<typename I, typename A> void transformTerm(int const * & pc, A * destination, A const * auxData, int const bufferSize,
+	template<typename I, typename A> void transformTerm(int const * & pc, A * destination, A const * auxData, size_t const bufferSize,
 		I const & imageData, Header const & header, std::vector<int> const & isChroma, int boost)
 	{
 		while (*pc >= 0)
@@ -693,9 +690,11 @@ namespace GFWX
 		typedef typename std::conditional<sizeof(base) < 2, int16_t, int32_t>::type aux;
 		if (header.sizex > (1 << 30) || header.sizey > (1 << 30))  // [NOTE] current implementation can't go over 2^30
 			return ErrorMalformed;
+		if (header.encoder < EncoderFast || header.encoder > EncoderHighBitrate)
+			return ErrorUnsupported;
 		Bits stream(reinterpret_cast<uint32_t *>(buffer), reinterpret_cast<uint32_t *>(buffer) + size / 4);
 		stream.putBits('G' | ('F' << 8) | ('W' << 16) | ('X' << 24), 32);
-		stream.putBits(header.version = 1, 32);
+		stream.putBits(header.version = 2, 32);
 		stream.putBits(header.sizex, 32);
 		stream.putBits(header.sizey, 32);
 		stream.putBits(header.layers - 1, 16);
@@ -713,8 +712,8 @@ namespace GFWX
 		if (stream.buffer + metaDataSizeInWords > stream.bufferEnd)
 			return ErrorOverflow;
 		stream.buffer = std::copy(metaData, metaData + metaDataSizeInWords, stream.buffer);
-		int const bufferSize = header.sizex * header.sizey;
-		std::vector<aux> auxData((size_t)header.layers * header.channels * bufferSize, 0);
+		size_t const bufferSize = static_cast<size_t>(header.sizex) * header.sizey;
+		std::vector<aux> auxData(static_cast<size_t>(header.layers) * header.channels * bufferSize, 0);
 		std::vector<int> isChroma(header.layers * header.channels, -1);
 		int const chromaQuality = std::max(1, (header.quality + header.chromaScale / 2) / header.chromaScale);
 		int const boost = header.quality == QualityMax ? 1 : 8;	// [NOTE] due to Cubic lifting max multiplier of 20, boost * 20 must be less than 256
@@ -733,10 +732,10 @@ namespace GFWX
 				isChroma[c] = *(pc ++);
 			}
 			for (int const * i = channelTransform; i <= pc; ++ i)
-				signedCode<2>(*i, stream);
+				signedCode(2, *i, stream);
 		}
 		else
-			signedCode<2>(-1, stream);
+			signedCode(2, -1, stream);
 		stream.flushWriteWord();
 		for (int c = 0; c < header.layers * header.channels; ++ c) if (isChroma[c] == -1)	// copy channels having no transform
 		{
@@ -833,19 +832,21 @@ namespace GFWX
 			return ErrorMalformed;  // [NOTE] current implementation can't go over 2^30
 		if (!imageData)		// just header
 			return ResultOk;
-		if (header.isSigned != (std::numeric_limits<base>::is_signed ? 1 : 0) || header.bitDepth > std::numeric_limits<base>::digits)
+		if (header.version > 2)
+			return ErrorUnsupported;
+		if (header.isSigned != (std::numeric_limits<base>::is_signed ? 1 : 0) || header.bitDepth - header.isSigned > std::numeric_limits<base>::digits)
 			return ErrorTypeMismatch;	// check for correct buffer type (though doesn't test the buffer size)
 		// [NOTE] clients can read metadata themselves by accessing the size (in words) at word[7] and the metadata at word[8+]
 		if ((stream.buffer += stream.getBits(32)) >= stream.bufferEnd) // skip metadata
 			return reinterpret_cast<uint8_t *>(stream.buffer) - data;	// suggest point of interest to skip metadata
 		int const sizexDown = (header.sizex + (1 << downsampling) - 1) >> downsampling, sizeyDown = (header.sizey + (1 << downsampling) - 1) >> downsampling;
-		int const bufferSize = sizexDown * sizeyDown;
-		std::vector<aux> auxData((size_t)header.layers * header.channels * bufferSize, 0);
+		size_t const bufferSize = static_cast<size_t>(sizexDown) * sizeyDown;
+		std::vector<aux> auxData(static_cast<size_t>(header.layers) * header.channels * bufferSize, 0);
 		std::vector<int> isChroma(header.layers * header.channels, 0), transformProgram, transformSteps;
 		size_t nextPointOfInterest = size + 1024;	// guess next point of interest [NOTE] may be larger than the complete file
 		while (true)	// decode color transform program (including isChroma flags)
 		{
-			transformProgram.push_back(signedDecode<2>(stream));	// channel
+			transformProgram.push_back(signedDecode(2, stream));	// channel
 			if (transformProgram.back() >= static_cast<int>(isChroma.size()))
 				return ErrorMalformed;
 			if (transformProgram.back() < 0)
@@ -855,15 +856,15 @@ namespace GFWX
 			{
 				if (stream.indexBits < 0)	// test for truncation
 					return nextPointOfInterest;	// need more data
-				transformProgram.push_back(signedDecode<2>(stream));	// other channel
+				transformProgram.push_back(signedDecode(2, stream));	// other channel
 				if (transformProgram.back() >= static_cast<int>(isChroma.size()))
 					return ErrorMalformed;
 				if (transformProgram.back() < 0)
 					break;
-				transformProgram.push_back(signedDecode<2>(stream));	// factor
+				transformProgram.push_back(signedDecode(2, stream));	// factor
 			}
-			transformProgram.push_back(signedDecode<2>(stream));	// denominator
-			transformProgram.push_back(signedDecode<2>(stream));	// chroma flag
+			transformProgram.push_back(signedDecode(2, stream));	// denominator
+			transformProgram.push_back(signedDecode(2, stream));	// chroma flag
 			isChroma[transformProgram[transformSteps.back()]] = transformProgram.back();
 		}
 		stream.flushReadWord();
@@ -944,21 +945,21 @@ namespace GFWX
 		}
 		for (int c = 0; c < header.layers * header.channels; ++ c)	// copy the channels to the destination buffer
 		{
-			aux * destination = &auxData[c * bufferSize];
+			aux * source = &auxData[c * bufferSize];
 			auto layer = imageData + ((c / header.channels) * bufferSize * header.channels + c % header.channels);
 			if (boost == 1)
 			{
 				OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 				for (int i = 0; i < bufferSize; ++ i)
 					layer[i * header.channels] = static_cast<base>(std::max(static_cast<aux>(std::numeric_limits<base>::lowest()),
-						std::min(static_cast<aux>(std::numeric_limits<base>::max()), static_cast<aux>(destination[i]))));
+						std::min(static_cast<aux>(std::numeric_limits<base>::max()), source[i])));
 			}
 			else
 			{
 				OMP_PARALLEL_FOR(ThreadIterations * ThreadIterations)
 				for (int i = 0; i < bufferSize; ++ i)
 					layer[i * header.channels] = static_cast<base>(std::max(static_cast<aux>(std::numeric_limits<base>::lowest()),
-						std::min(static_cast<aux>(std::numeric_limits<base>::max()), static_cast<aux>(destination[i] / boost))));
+						std::min(static_cast<aux>(std::numeric_limits<base>::max()), static_cast<aux>(source[i] / boost))));
 			}
 			if (header.quality < QualityMax && header.intent >= IntentBayerRGGB && header.intent <= IntentBayerGBRG)	// check if Bayer cleanup is required
 			{
