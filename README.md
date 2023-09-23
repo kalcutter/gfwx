@@ -13,7 +13,7 @@ Features
 --------
 * Lossy and lossless compression
 * Progressive decoding with optional downsampling
-* Fast, simple, optionally multithreaded C++11 implementation
+* Fast, simple, optionally multithreaded C++20 implementation
 * Supports 8-bit or 16-bit data (or anything in between), signed or unsigned
 * Stores up to 65536 channels (not limited to RGBA)
 * Stores up to 65536 layers or frames
