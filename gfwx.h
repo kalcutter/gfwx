@@ -1,5 +1,5 @@
-//  Good, Fast Wavelet Codec "GFWX" v2
-//  ----------------------------------
+//  Good, Fast Wavelet Codec "GFWX" v1.2
+//  ------------------------------------
 //  December 1, 2015 [patched on December 28, 2019 and Aug 23, 2023]
 //  Author: Graham Fyffe <gfyffe@gmail.com>, Google LLC, and Apple Inc.
 //  Website: www.gfwx.org
@@ -694,7 +694,7 @@ namespace GFWX
 			return ErrorUnsupported;
 		Bits stream(reinterpret_cast<uint32_t *>(buffer), reinterpret_cast<uint32_t *>(buffer) + size / 4);
 		stream.putBits('G' | ('F' << 8) | ('W' << 16) | ('X' << 24), 32);
-		stream.putBits(header.version = 2, 32);
+		stream.putBits(header.version = 1, 32);
 		stream.putBits(header.sizex, 32);
 		stream.putBits(header.sizey, 32);
 		stream.putBits(header.layers - 1, 16);
@@ -832,7 +832,7 @@ namespace GFWX
 			return ErrorMalformed;  // [NOTE] current implementation can't go over 2^30
 		if (!imageData)		// just header
 			return ResultOk;
-		if (header.version > 2)
+		if (header.version > 1)
 			return ErrorUnsupported;
 		if (header.isSigned != (std::numeric_limits<base>::is_signed ? 1 : 0) || header.bitDepth - header.isSigned > std::numeric_limits<base>::digits)
 			return ErrorTypeMismatch;	// check for correct buffer type (though doesn't test the buffer size)
